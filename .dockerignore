@@ -1,0 +1,38 @@
+# Node modules (reinstalled during build)
+node_modules/
+
+# Build output (regenerated during build)
+dist/
+
+# Environment files (secrets via Fly.io)
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Test files
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

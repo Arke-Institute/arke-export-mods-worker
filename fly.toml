@@ -1,0 +1,22 @@
+# Fly.io configuration for MODS export worker
+# This worker is spawned ephemerally via Fly Machines API
+
+app = "arke-mods-export-worker"
+primary_region = "ord"  # Chicago - close to Cloudflare
+
+[build]
+  # Dockerfile is used for build (no image specified)
+
+# NO [http_service] section
+# This worker does NOT listen for HTTP requests
+# It is spawned via Machines API with environment variables
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 2
+
+# Environment variables for production
+# These are defaults - orchestrator can override via Machines API
+[env]
+  R2_BUCKET = "arke-exports"
