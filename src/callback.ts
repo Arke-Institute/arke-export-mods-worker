@@ -13,6 +13,7 @@ export interface SuccessCallback {
     total_time_ms: number;
     entities_exported: number;
     entities_failed: number;
+    entities_incomplete: number;
     peak_memory_mb: number;
   };
 }

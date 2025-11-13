@@ -79,6 +79,65 @@ The `EXPORT_OPTIONS` JSON string supports:
 }
 ```
 
+## Graceful Degradation
+
+The worker implements **graceful degradation** for missing PINAX metadata:
+
+### Behavior
+
+- **Missing PINAX**: If `pinax.json` is missing, the worker generates a **minimal MODS record** instead of failing
+- **Incomplete Records**: Tracked separately from complete exports
+- **Children Still Processed**: Even if a parent has missing PINAX, its children are still queued and exported
+- **No Data Loss**: Entire subtrees are preserved, not silently skipped
+
+### Minimal MODS Record Structure
+
+When PINAX is missing, the record includes:
+
+```xml
+<mods>
+  <titleInfo type="alternative">
+    <title>[Incomplete Record: 01K9...]</title>
+  </titleInfo>
+  <identifier type="arke-pi">01K9...</identifier>
+  <identifier type="arke-manifest-cid">bafybei...</identifier>
+  <note type="metadata-status" displayLabel="Metadata Status">
+    Incomplete: PINAX metadata unavailable at time of export.
+  </note>
+  <note type="metadata-remediation" displayLabel="Remediation Note">
+    To complete this record, ensure pinax.json component exists...
+  </note>
+  <location>
+    <url usage="primary">https://api.arke.institute/manifest/01K9...</url>
+  </location>
+  <!-- Still includes relatedItems for parent/children/components -->
+</mods>
+```
+
+### Export Result Metrics
+
+The callback includes incomplete record tracking:
+
+```json
+{
+  "status": "success",
+  "metrics": {
+    "entities_exported": 72,
+    "entities_failed": 2,
+    "entities_incomplete": 5,  // <-- Records with missing PINAX
+    ...
+  }
+}
+```
+
+### Use Cases
+
+This design ensures:
+- **Resilience**: Partial metadata failures don't break entire exports
+- **Visibility**: Incomplete records are clearly marked for remediation
+- **Completeness**: Tree structure is fully preserved
+- **Discovery**: Minimal records can still be found and linked
+
 ## Callback Contract
 
 ### Success Callback
@@ -97,6 +156,7 @@ POST ${CALLBACK_URL}
     "total_time_ms": 2934,
     "entities_exported": 72,
     "entities_failed": 0,
+    "entities_incomplete": 5,
     "peak_memory_mb": 30
   }
 }

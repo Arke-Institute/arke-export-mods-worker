@@ -20,6 +20,7 @@ export interface RecursiveExportResult {
   totalEntities: number;
   successCount: number;
   errorCount: number;
+  incompleteCount: number;
   outputPath: string;
   timings: {
     total: number;
@@ -31,6 +32,7 @@ export interface RecursiveExportResult {
     peakUsage: number;
   };
   errors: Array<{ pi: string; error: string }>;
+  incompleteRecords: Array<{ pi: string; reason: string }>;
 }
 
 export type ProgressCallback = (progress: {
@@ -69,6 +71,7 @@ export class RecursiveModsExporter {
   ): Promise<RecursiveExportResult> {
     const startTime = Date.now();
     const errors: Array<{ pi: string; error: string }> = [];
+    const incompleteRecords: Array<{ pi: string; reason: string }> = [];
 
     if (this.config.verbose) {
       console.error(`\n${'='.repeat(60)}`);
@@ -81,10 +84,11 @@ export class RecursiveModsExporter {
     await this.writer.open(outputPath);
 
     try {
-      const { entityCount, successCount } = await this.traverseBFS(
+      const { entityCount, successCount, incompleteCount } = await this.traverseBFS(
         rootPI,
         options,
-        errors
+        errors,
+        incompleteRecords
       );
 
       // Close stream
@@ -94,6 +98,7 @@ export class RecursiveModsExporter {
         totalEntities: entityCount,
         successCount,
         errorCount: errors.length,
+        incompleteCount,
         outputPath,
         timings: {
           total: Date.now() - startTime,
@@ -105,6 +110,7 @@ export class RecursiveModsExporter {
           peakUsage: process.memoryUsage().heapUsed,
         },
         errors,
+        incompleteRecords,
       };
 
       if (this.config.verbose) {
@@ -125,8 +131,9 @@ export class RecursiveModsExporter {
   private async traverseBFS(
     rootPI: string,
     options: RecursiveOptions,
-    errors: Array<{ pi: string; error: string }>
-  ): Promise<{ entityCount: number; successCount: number }> {
+    errors: Array<{ pi: string; error: string }>,
+    incompleteRecords: Array<{ pi: string; reason: string }>
+  ): Promise<{ entityCount: number; successCount: number; incompleteCount: number }> {
     // Queue of nodes to process
     const queue: EntityNode[] = [{
       pi: rootPI,
@@ -137,6 +144,7 @@ export class RecursiveModsExporter {
     const visited = new Set<string>([rootPI]);
     let entityCount = 0;
     let successCount = 0;
+    let incompleteCount = 0;
 
     while (queue.length > 0) {
       // Extract all nodes at current depth
@@ -157,7 +165,7 @@ export class RecursiveModsExporter {
 
         // Parallel fetch + export + write
         const results = await Promise.allSettled(
-          batch.map(node => this.processEntity(node, options))
+          batch.map(node => this.processEntity(node, options, incompleteRecords))
         );
 
         // Handle results
@@ -170,11 +178,18 @@ export class RecursiveModsExporter {
           if (result.status === 'fulfilled') {
             successCount++;
 
-            if (this.config.verbose) {
+            // Check if record was incomplete
+            if (result.value.isIncomplete) {
+              incompleteCount++;
+              if (this.config.verbose) {
+                console.error(`    ⚠ ${node.pi} (depth ${node.depth}) - INCOMPLETE: ${result.value.incompleteReason}`);
+              }
+            } else if (this.config.verbose) {
               console.error(`    ✓ ${node.pi} (depth ${node.depth})`);
             }
 
             // Add children to queue (if not at max depth)
+            // KEY CHANGE: Still queue children even if record was incomplete
             if (node.depth < options.maxDepth && result.value.children) {
               for (const childPI of result.value.children) {
                 if (!visited.has(childPI)) {
@@ -223,7 +238,7 @@ export class RecursiveModsExporter {
       }
     }
 
-    return { entityCount, successCount };
+    return { entityCount, successCount, incompleteCount };
   }
 
   /**
@@ -247,22 +262,36 @@ export class RecursiveModsExporter {
    */
   private async processEntity(
     node: EntityNode,
-    _options: RecursiveOptions
-  ): Promise<{ children?: string[] }> {
-    // 1. Export single entity (reuse existing exporter)
+    _options: RecursiveOptions,
+    incompleteRecords: Array<{ pi: string; reason: string }>
+  ): Promise<{ children?: string[]; isIncomplete?: boolean; incompleteReason?: string }> {
+    // 1. Fetch manifest first (needed for children regardless of export success)
+    const manifest = await this.apiClient.fetchManifest(node.pi);
+
+    // 2. Check if PINAX exists
+    const hasPinax = !!manifest.components['pinax.json'];
+
+    // 3. Export single entity (reuse existing exporter)
     // Create new exporter instance with quiet mode for recursive processing
     const quietConfig = { ...this.config, verbose: false };
     const exporter = new ModsExporter(quietConfig);
     const modsXml = await exporter.export(node.pi);
 
-    // 2. Write to stream
+    // 4. Write to stream
     await this.writer.writeMods(modsXml, node);
 
-    // 3. Fetch manifest to get children (for next level)
-    const manifest = await this.apiClient.fetchManifest(node.pi);
+    // 5. Track if incomplete
+    if (!hasPinax) {
+      incompleteRecords.push({
+        pi: node.pi,
+        reason: 'Missing PINAX metadata (pinax.json component not found)',
+      });
+    }
 
     return {
       children: manifest.children_pi,
+      isIncomplete: !hasPinax,
+      incompleteReason: !hasPinax ? 'Missing PINAX metadata' : undefined,
     };
   }
 
@@ -275,15 +304,26 @@ export class RecursiveModsExporter {
     console.error('='.repeat(60));
     console.error(`Total Entities:    ${result.totalEntities}`);
     console.error(`Successful:        ${result.successCount}`);
+    console.error(`Incomplete:        ${result.incompleteCount}`);
     console.error(`Errors:            ${result.errorCount}`);
     console.error(`Total Time:        ${(result.timings.total / 1000).toFixed(2)}s`);
     console.error(`Peak Memory:       ${this.formatBytes(result.memory.peakUsage)}`);
     console.error(`Output File:       ${result.outputPath}`);
 
+    if (result.incompleteRecords.length > 0) {
+      console.error('\nINCOMPLETE RECORDS (exported with minimal metadata):');
+      for (const incomplete of result.incompleteRecords.slice(0, 10)) {
+        console.error(`  ⚠ ${incomplete.pi}: ${incomplete.reason}`);
+      }
+      if (result.incompleteRecords.length > 10) {
+        console.error(`  ... and ${result.incompleteRecords.length - 10} more`);
+      }
+    }
+
     if (result.errors.length > 0) {
-      console.error('\nERRORS:');
+      console.error('\nERRORS (not exported):');
       for (const error of result.errors.slice(0, 10)) {
-        console.error(`  - ${error.pi}: ${error.error}`);
+        console.error(`  ✗ ${error.pi}: ${error.error}`);
       }
       if (result.errors.length > 10) {
         console.error(`  ... and ${result.errors.length - 10} more`);

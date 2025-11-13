@@ -119,6 +119,7 @@ async function exportMods(): Promise<void> {
     // -------------------------------------------------------------------------
     let entityCount = 1;
     let errorCount = 0;
+    let incompleteCount = 0;
 
     if (exportOptions.recursive) {
       console.log(`\n[${MACHINE_ID}] Starting recursive export...`);
@@ -133,10 +134,17 @@ async function exportMods(): Promise<void> {
 
       entityCount = result.totalEntities;
       errorCount = result.errorCount;
+      incompleteCount = result.incompleteCount;
 
       console.log(
         `\n[${MACHINE_ID}] ✓ Exported ${result.successCount}/${result.totalEntities} entities`
       );
+
+      if (incompleteCount > 0) {
+        console.log(
+          `[${MACHINE_ID}] ⚠ ${incompleteCount} incomplete records (missing PINAX metadata)`
+        );
+      }
     } else {
       console.log(`\n[${MACHINE_ID}] Starting single entity export...`);
 
@@ -194,6 +202,7 @@ async function exportMods(): Promise<void> {
         total_time_ms: totalTime,
         entities_exported: entityCount,
         entities_failed: errorCount,
+        entities_incomplete: incompleteCount,
         peak_memory_mb: peakMemoryMB,
       },
     });
@@ -206,6 +215,7 @@ async function exportMods(): Promise<void> {
     console.log('='.repeat(60));
     console.log(`Total time:    ${(totalTime / 1000).toFixed(2)}s`);
     console.log(`Entities:      ${entityCount}`);
+    console.log(`Incomplete:    ${incompleteCount}`);
     console.log(`Errors:        ${errorCount}`);
     console.log(`File size:     ${formatBytes(fileSizeBytes)}`);
     console.log(`Peak memory:   ${peakMemoryMB} MB`);

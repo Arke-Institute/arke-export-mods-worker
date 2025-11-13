@@ -89,10 +89,13 @@ The worker POSTs to `${CALLBACK_URL}` when complete:
     "total_time_ms": 3480,
     "entities_exported": 72,
     "entities_failed": 0,
+    "entities_incomplete": 5,
     "peak_memory_mb": 39
   }
 }
 ```
+
+**Note**: `entities_incomplete` indicates records exported with minimal metadata due to missing PINAX. These records are still exported (preserving tree structure) but marked as incomplete.
 
 ### Error Callback
 
