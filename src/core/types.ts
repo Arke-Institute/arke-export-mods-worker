@@ -160,12 +160,12 @@ export interface LinkedRelationship {
 export interface ExportedComponent {
   key: string;
   cid: string;
+  url: string;
   type: 'ref' | 'pinax' | 'description' | 'cheimarros' | 'other';
   ref?: {
     mime_type: string;
     size: number;
     cdn_url: string;
-    ipfs_url: string;
     ocr_text?: string;
     ocr_truncated?: boolean;
   };

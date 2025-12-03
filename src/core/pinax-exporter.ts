@@ -121,8 +121,15 @@ export class PinaxExporter {
     // Fetch manifest
     const manifest = await this.arkeClient.fetchManifest(pi);
 
-    // Fetch PINAX metadata
-    const pinax = await this.arkeClient.fetchPinax(manifest);
+    // Fetch PINAX metadata and fix access_url
+    let pinax = await this.arkeClient.fetchPinax(manifest);
+    if (pinax) {
+      // Override placeholder access_url with actual arke.institute URL
+      pinax = {
+        ...pinax,
+        access_url: `https://arke.institute/${pi}`,
+      };
+    }
 
     // Fetch description
     let description: string | null = await this.arkeClient.fetchDescription(manifest);
@@ -253,6 +260,7 @@ export class PinaxExporter {
       const component: ExportedComponent = {
         key,
         cid,
+        url: `${this.config.ipfsGateway}/ipfs/${cid}`,
         type: componentType,
       };
 
@@ -273,7 +281,6 @@ export class PinaxExporter {
             mime_type: refData.type,
             size: refData.size,
             cdn_url: refData.url,
-            ipfs_url: `${this.config.ipfsGateway}/ipfs/${refData.ipfs_cid}`,
           };
 
           if (ocrText) {
