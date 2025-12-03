@@ -17,9 +17,7 @@ export class PerformanceMonitor {
         manifestFetch: 0,
         componentDownloads: 0,
         pinaxParsing: 0,
-        cheimarrosProcessing: 0,
-        modsGeneration: 0,
-        xmlValidation: 0,
+        graphdbFetch: 0,
         total: 0,
       },
       memory: {
@@ -30,7 +28,7 @@ export class PerformanceMonitor {
         totalBytesDownloaded: 0,
         componentsProcessed: 0,
         ocrTextSize: 0,
-        finalXmlSize: 0,
+        finalJsonSize: 0,
       },
     };
   }
@@ -107,9 +105,7 @@ export class PerformanceMonitor {
     lines.push(`  Manifest Fetch:        ${m.timings.manifestFetch.toFixed(0)}ms`);
     lines.push(`  Component Downloads:   ${m.timings.componentDownloads.toFixed(0)}ms`);
     lines.push(`  PINAX Parsing:         ${m.timings.pinaxParsing.toFixed(0)}ms`);
-    lines.push(`  Cheimarros Processing: ${m.timings.cheimarrosProcessing.toFixed(0)}ms`);
-    lines.push(`  MODS Generation:       ${m.timings.modsGeneration.toFixed(0)}ms`);
-    lines.push(`  XML Validation:        ${m.timings.xmlValidation.toFixed(0)}ms`);
+    lines.push(`  GraphDB Fetch:         ${m.timings.graphdbFetch.toFixed(0)}ms`);
     lines.push(`  TOTAL:                 ${m.timings.total.toFixed(0)}ms`);
     lines.push('');
 
@@ -122,7 +118,7 @@ export class PerformanceMonitor {
     lines.push(`  Bytes Downloaded:      ${formatBytes(m.data.totalBytesDownloaded)}`);
     lines.push(`  Components Processed:  ${m.data.componentsProcessed}`);
     lines.push(`  OCR Text Size:         ${formatBytes(m.data.ocrTextSize)}`);
-    lines.push(`  Final XML Size:        ${formatBytes(m.data.finalXmlSize)}`);
+    lines.push(`  Final JSON Size:       ${formatBytes(m.data.finalJsonSize)}`);
     lines.push('');
     lines.push('='.repeat(60));
 

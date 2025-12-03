@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * MODS Export Worker - Fly.io Ephemeral Machine
+ * Pinax Export Worker - Fly.io Ephemeral Machine
  *
  * Contract:
  * - Receives PI + export options via environment variables
- * - Exports MODS XML to local temp file
+ * - Exports Pinax JSON to local temp file
  * - Uploads to R2 storage
  * - Sends callback with R2 key
  * - Exits (auto-destroy)
@@ -14,11 +14,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { unlinkSync, statSync } from 'fs';
 import { writeFile } from 'fs/promises';
-import { ModsExporter } from './core/mods-exporter.js';
-import { RecursiveModsExporter } from './core/recursive-exporter.js';
+import { PinaxExporter } from './core/pinax-exporter.js';
 import { uploadToR2 } from './r2-client.js';
 import { sendCallback } from './callback.js';
-import type { ExportConfig } from './core/types.js';
+import type { PinaxExportOptions } from './core/types.js';
 
 // ============================================================================
 // 1. ENVIRONMENT VALIDATION
@@ -27,7 +26,6 @@ import type { ExportConfig } from './core/types.js';
 const TASK_ID = process.env.TASK_ID;
 const BATCH_ID = process.env.BATCH_ID || 'default';
 const PI = process.env.PI;
-const EXPORT_FORMAT = process.env.EXPORT_FORMAT || 'mods';
 const EXPORT_OPTIONS_JSON = process.env.EXPORT_OPTIONS || '{}';
 const CALLBACK_URL = process.env.CALLBACK_URL;
 const MACHINE_ID = process.env.FLY_MACHINE_ID || 'local';
@@ -50,16 +48,7 @@ if (!TASK_ID || !PI || !R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_
 }
 
 // Parse export options
-interface ExportOptions {
-  recursive?: boolean;
-  maxDepth?: number;
-  parallelBatchSize?: number;
-  includeOcr?: boolean;
-  cheimarrosMode?: 'full' | 'minimal' | 'skip';
-  validate?: boolean;
-}
-
-let exportOptions: ExportOptions;
+let exportOptions: PinaxExportOptions;
 try {
   exportOptions = JSON.parse(EXPORT_OPTIONS_JSON);
 } catch (error) {
@@ -69,17 +58,16 @@ try {
 }
 
 console.log(`\n${'='.repeat(60)}`);
-console.log(`[${MACHINE_ID}] MODS Export Worker Started`);
+console.log(`[${MACHINE_ID}] Pinax Export Worker Started`);
 console.log('='.repeat(60));
 console.log(`Task ID:       ${TASK_ID}`);
 console.log(`Batch ID:      ${BATCH_ID}`);
 console.log(`PI:            ${PI}`);
-console.log(`Format:        ${EXPORT_FORMAT}`);
 console.log(`Recursive:     ${exportOptions.recursive ?? false}`);
-console.log(`Max Depth:     ${exportOptions.maxDepth ?? 5}`);
+console.log(`Max Depth:     ${exportOptions.maxDepth ?? 10}`);
 console.log(`Batch Size:    ${exportOptions.parallelBatchSize ?? 10}`);
 console.log(`Include OCR:   ${exportOptions.includeOcr ?? true}`);
-console.log(`Cheimarros:    ${exportOptions.cheimarrosMode ?? 'full'}`);
+console.log(`Entity Source: ${exportOptions.entitySource ?? 'graphdb'}`);
 console.log(`Callback URL:  ${CALLBACK_URL || '(none)'}`);
 console.log('='.repeat(60));
 
@@ -87,7 +75,7 @@ console.log('='.repeat(60));
 // 2. MAIN PROCESSING FUNCTION
 // ============================================================================
 
-async function exportMods(): Promise<void> {
+async function exportPinax(): Promise<void> {
   const startTime = Date.now();
   let tempFilePath: string | null = null;
 
@@ -96,69 +84,52 @@ async function exportMods(): Promise<void> {
     // STEP 1: Generate temp file path
     // -------------------------------------------------------------------------
     const timestamp = Date.now();
-    const filename = exportOptions.recursive ? `${PI}-collection.xml` : `${PI}.xml`;
+    const filename = exportOptions.recursive ? `${PI}-collection.json` : `${PI}.json`;
     tempFilePath = join(tmpdir(), `${TASK_ID}-${timestamp}-${filename}`);
 
     console.log(`\n[${MACHINE_ID}] Temp file: ${tempFilePath}`);
 
     // -------------------------------------------------------------------------
-    // STEP 2: Build export configuration
+    // STEP 2: Export Pinax JSON
     // -------------------------------------------------------------------------
-    const config: ExportConfig = {
-      apiUrl: 'https://api.arke.institute',
-      ipfsGateway: 'https://ipfs.arke.institute',
-      cdnUrl: 'https://cdn.arke.institute',
-      includeOcr: exportOptions.includeOcr ?? true,
-      cheimarrosMode: exportOptions.cheimarrosMode ?? 'full',
-      validate: false, // Don't validate in worker (too slow + requires xmllint)
-      verbose: true, // Always verbose for logging
-    };
+    console.log(`\n[${MACHINE_ID}] Starting Pinax export...`);
 
-    // -------------------------------------------------------------------------
-    // STEP 3: Export MODS XML
-    // -------------------------------------------------------------------------
-    let entityCount = 1;
-    let errorCount = 0;
-    let incompleteCount = 0;
-
-    if (exportOptions.recursive) {
-      console.log(`\n[${MACHINE_ID}] Starting recursive export...`);
-
-      const exporter = new RecursiveModsExporter(config);
-      const result = await exporter.exportRecursive(PI!, tempFilePath, {
-        maxDepth: exportOptions.maxDepth ?? 5,
+    const exporter = new PinaxExporter(
+      { verbose: true },
+      {
+        recursive: exportOptions.recursive ?? false,
+        maxDepth: exportOptions.maxDepth ?? 10,
+        includeOcr: exportOptions.includeOcr ?? true,
+        maxTextLength: exportOptions.maxTextLength ?? 100000,
+        entitySource: exportOptions.entitySource ?? 'graphdb',
+        includeComponents: exportOptions.includeComponents ?? true,
         parallelBatchSize: exportOptions.parallelBatchSize ?? 10,
-        includeParent: true,
-        traversalMode: 'breadth-first',
-      });
-
-      entityCount = result.totalEntities;
-      errorCount = result.errorCount;
-      incompleteCount = result.incompleteCount;
-
-      console.log(
-        `\n[${MACHINE_ID}] ✓ Exported ${result.successCount}/${result.totalEntities} entities`
-      );
-
-      if (incompleteCount > 0) {
-        console.log(
-          `[${MACHINE_ID}] ⚠ ${incompleteCount} incomplete records (missing PINAX metadata)`
-        );
       }
-    } else {
-      console.log(`\n[${MACHINE_ID}] Starting single entity export...`);
+    );
 
-      const exporter = new ModsExporter(config);
-      const xml = await exporter.export(PI!);
+    const result = await exporter.export(PI!);
+    const json = JSON.stringify(result, null, 2);
 
-      // Write to temp file
-      await writeFile(tempFilePath, xml, 'utf-8');
+    // Count entities exported
+    let entityCount = 1;
+    const countChildren = (entity: { children?: unknown[] }): number => {
+      let count = 1;
+      if (entity.children && Array.isArray(entity.children)) {
+        for (const child of entity.children) {
+          count += countChildren(child as { children?: unknown[] });
+        }
+      }
+      return count;
+    };
+    entityCount = countChildren(result.root);
 
-      console.log(`[${MACHINE_ID}] ✓ Exported single entity`);
-    }
+    // Write to temp file
+    await writeFile(tempFilePath, json, 'utf-8');
+
+    console.log(`[${MACHINE_ID}] ✓ Exported ${entityCount} entities`);
 
     // -------------------------------------------------------------------------
-    // STEP 4: Get file size
+    // STEP 3: Get file size
     // -------------------------------------------------------------------------
     const fileStats = statSync(tempFilePath);
     const fileSizeBytes = fileStats.size;
@@ -166,7 +137,7 @@ async function exportMods(): Promise<void> {
     console.log(`\n[${MACHINE_ID}] File size: ${formatBytes(fileSizeBytes)}`);
 
     // -------------------------------------------------------------------------
-    // STEP 5: Upload to R2
+    // STEP 4: Upload to R2
     // -------------------------------------------------------------------------
     console.log(`\n[${MACHINE_ID}] Uploading to R2...`);
 
@@ -183,7 +154,7 @@ async function exportMods(): Promise<void> {
     console.log(`[${MACHINE_ID}] ✓ Uploaded to R2: ${r2Key}`);
 
     // -------------------------------------------------------------------------
-    // STEP 6: Send success callback
+    // STEP 5: Send success callback
     // -------------------------------------------------------------------------
     const totalTime = Date.now() - startTime;
     const memoryUsage = process.memoryUsage();
@@ -201,22 +172,20 @@ async function exportMods(): Promise<void> {
       metrics: {
         total_time_ms: totalTime,
         entities_exported: entityCount,
-        entities_failed: errorCount,
-        entities_incomplete: incompleteCount,
+        entities_failed: 0,
+        entities_incomplete: 0,
         peak_memory_mb: peakMemoryMB,
       },
     });
 
     // -------------------------------------------------------------------------
-    // STEP 7: Cleanup and exit
+    // STEP 6: Cleanup and exit
     // -------------------------------------------------------------------------
     console.log(`\n${'='.repeat(60)}`);
     console.log('EXPORT COMPLETE');
     console.log('='.repeat(60));
     console.log(`Total time:    ${(totalTime / 1000).toFixed(2)}s`);
     console.log(`Entities:      ${entityCount}`);
-    console.log(`Incomplete:    ${incompleteCount}`);
-    console.log(`Errors:        ${errorCount}`);
     console.log(`File size:     ${formatBytes(fileSizeBytes)}`);
     console.log(`Peak memory:   ${peakMemoryMB} MB`);
     console.log(`R2 key:        ${r2Key}`);
@@ -285,4 +254,4 @@ function formatBytes(bytes: number): string {
 // START PROCESSING IMMEDIATELY
 // ============================================================================
 
-exportMods();
+exportPinax();
