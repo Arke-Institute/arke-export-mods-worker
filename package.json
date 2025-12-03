@@ -1,13 +1,14 @@
 {
   "name": "arke-mods-export-worker",
   "version": "0.1.0",
-  "description": "Ephemeral Fly.io worker for MODS export to R2 storage",
+  "description": "Ephemeral Fly.io worker for Pinax JSON export to R2 storage",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsx --env-file=.env src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "deploy": "flyctl deploy --remote-only --image-label latest"
   },
   "keywords": [
     "arke",

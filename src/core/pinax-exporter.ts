@@ -95,7 +95,7 @@ export class PinaxExporter {
     const root = await this.exportEntity(pi, 0);
 
     const result: PinaxExport = {
-      $schema: 'https://arke.institute/schemas/export/v1',
+      $schema: 'https://export.arke.institute/schemas/export/v1',
       version: '1.0.0',
       exported_at: new Date().toISOString(),
       export_options: this.options,

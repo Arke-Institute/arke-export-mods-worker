@@ -90,7 +90,7 @@ export interface PinaxExportOptions {
   maxDepth?: number;
   includeOcr?: boolean;
   maxTextLength?: number;
-  entitySource?: 'graphdb' | 'cheimarros' | 'both';
+  entitySource?: 'none' | 'graphdb' | 'cheimarros' | 'both';
   includeComponents?: boolean;
   componentTypes?: ('ref' | 'pinax' | 'description' | 'cheimarros' | 'other')[];
   parallelBatchSize?: number;
@@ -108,7 +108,7 @@ export const DEFAULT_PINAX_EXPORT_OPTIONS: Required<PinaxExportOptions> = {
 };
 
 export interface PinaxExport {
-  $schema: 'https://arke.institute/schemas/export/v1';
+  $schema: 'https://export.arke.institute/schemas/export/v1';
   version: '1.0.0';
   exported_at: string;
   export_options: PinaxExportOptions;
