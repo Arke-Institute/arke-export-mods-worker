@@ -4,6 +4,7 @@
 
 import type { ArkeManifest, ArkeRefJson, PinaxMetadata, CheimarrosGraph, ExportConfig } from './types.js';
 import type { PerformanceMonitor } from './performance.js';
+import { processBatchWithErrors } from './batch-utils.js';
 
 export class ArkeApiClient {
   constructor(
@@ -153,28 +154,31 @@ export class ArkeApiClient {
   }
 
   /**
-   * Fetch all .ref.json files from components
+   * Fetch all .ref.json files from components in parallel batches
+   *
+   * @param manifest - The entity manifest
+   * @param batchSize - Maximum concurrent fetches (default: 50)
    */
-  async fetchRefJsonFiles(manifest: ArkeManifest): Promise<Map<string, ArkeRefJson>> {
-    const refFiles = new Map<string, ArkeRefJson>();
+  async fetchRefJsonFiles(manifest: ArkeManifest, batchSize: number = 50): Promise<Map<string, ArkeRefJson>> {
     const refKeys = Object.keys(manifest.components).filter(key => key.endsWith('.ref.json'));
 
     if (refKeys.length === 0) {
       if (this.config.verbose) {
         console.error('[REF] No .ref.json files found');
       }
-      return refFiles;
+      return new Map();
     }
 
     if (this.config.verbose) {
       console.error(`[REF] Found ${refKeys.length} .ref.json files`);
     }
 
-    for (const key of refKeys) {
-      const cid = manifest.components[key];
-      try {
+    const { results: refFiles, errors } = await processBatchWithErrors(
+      refKeys,
+      batchSize,
+      async (key) => {
+        const cid = manifest.components[key];
         const refJson = await this.fetchIpfsJson<ArkeRefJson>(cid);
-        refFiles.set(key, refJson);
 
         if (refJson.ocr && this.config.includeOcr) {
           this.monitor.addDataMetric('ocrTextSize', refJson.ocr.length);
@@ -183,10 +187,15 @@ export class ArkeApiClient {
         if (this.config.verbose) {
           console.error(`[REF] ✓ ${key}: ${refJson.type}, ${formatBytes(refJson.size)}`);
         }
-      } catch (error) {
-        if (this.config.verbose) {
-          console.error(`[REF] ✗ Failed to fetch ${key}: ${error}`);
-        }
+
+        return { key, value: refJson };
+      }
+    );
+
+    // Log errors
+    for (const { item: key, error } of errors) {
+      if (this.config.verbose) {
+        console.error(`[REF] ✗ Failed to fetch ${key}: ${error}`);
       }
     }
 

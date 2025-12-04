@@ -58,6 +58,9 @@ export class PinaxExporter {
       includeComponents: options.includeComponents ?? true,
       componentTypes: options.componentTypes ?? ['ref', 'pinax', 'description', 'cheimarros', 'other'],
       parallelBatchSize: options.parallelBatchSize ?? 10,
+      refJsonBatchSize: options.refJsonBatchSize ?? 50,
+      graphdbBatchSize: options.graphdbBatchSize ?? 20,
+      entityBatchSize: options.entityBatchSize ?? options.parallelBatchSize ?? 10,
     };
 
     // Initialize clients
@@ -112,8 +115,16 @@ export class PinaxExporter {
 
   /**
    * Export a single entity at a given depth
+   *
+   * @param pi - The PI to export
+   * @param depth - Current depth in the tree
+   * @param prefetchedGraphDB - Optional pre-fetched GraphDB data (for batch optimization)
    */
-  private async exportEntity(pi: string, depth: number): Promise<ExportedEntity> {
+  private async exportEntity(
+    pi: string,
+    depth: number,
+    prefetchedGraphDB?: { entities: LinkedEntity[]; relationships: LinkedRelationship[] }
+  ): Promise<ExportedEntity> {
     if (this.config.verbose) {
       console.error(`[Export] Processing PI ${pi} at depth ${depth}`);
     }
@@ -143,13 +154,14 @@ export class PinaxExporter {
       description = normalizeText(description);
     }
 
-    // Fetch entities and relationships
+    // Fetch entities and relationships (use pre-fetched if available)
     let entities: LinkedEntity[] | undefined;
     let relationships: LinkedRelationship[] | undefined;
     let cheimarros: CheimarrosGraph | undefined;
 
     if (this.options.entitySource === 'graphdb' || this.options.entitySource === 'both') {
-      const graphdbData = await this.graphdbClient.getEntitiesForPI(pi);
+      // Use pre-fetched data if available, otherwise fetch
+      const graphdbData = prefetchedGraphDB ?? await this.graphdbClient.getEntitiesForPI(pi);
       if (graphdbData.entities.length > 0) {
         entities = graphdbData.entities;
         relationships = graphdbData.relationships;
@@ -219,11 +231,20 @@ export class PinaxExporter {
   }
 
   /**
-   * Export children entities in batches
+   * Export children entities in batches with pre-fetched GraphDB data
    */
   private async exportChildren(childrenPis: string[], depth: number): Promise<ExportedEntity[]> {
     const children: ExportedEntity[] = [];
-    const batchSize = this.options.parallelBatchSize;
+    const batchSize = this.options.entityBatchSize;
+
+    // Pre-fetch GraphDB data for all children if using graphdb entity source
+    let graphdbDataMap: Map<string, { entities: LinkedEntity[]; relationships: LinkedRelationship[] }> | undefined;
+    if (this.options.entitySource === 'graphdb' || this.options.entitySource === 'both') {
+      if (this.config.verbose) {
+        console.error(`[Export] Pre-fetching GraphDB data for ${childrenPis.length} children`);
+      }
+      graphdbDataMap = await this.graphdbClient.getEntitiesForPIs(childrenPis, this.options.graphdbBatchSize);
+    }
 
     for (let i = 0; i < childrenPis.length; i += batchSize) {
       const batch = childrenPis.slice(i, i + batchSize);
@@ -233,7 +254,7 @@ export class PinaxExporter {
       }
 
       const batchResults = await Promise.all(
-        batch.map(pi => this.exportEntity(pi, depth))
+        batch.map(pi => this.exportEntity(pi, depth, graphdbDataMap?.get(pi)))
       );
 
       children.push(...batchResults);
@@ -247,7 +268,7 @@ export class PinaxExporter {
    */
   private async buildComponents(manifest: ArkeManifest): Promise<ExportedComponent[]> {
     const components: ExportedComponent[] = [];
-    const refFiles = await this.arkeClient.fetchRefJsonFiles(manifest);
+    const refFiles = await this.arkeClient.fetchRefJsonFiles(manifest, this.options.refJsonBatchSize);
 
     for (const [key, cid] of Object.entries(manifest.components)) {
       const componentType = this.getComponentType(key);

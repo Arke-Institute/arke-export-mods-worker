@@ -94,6 +94,11 @@ export interface PinaxExportOptions {
   includeComponents?: boolean;
   componentTypes?: ('ref' | 'pinax' | 'description' | 'cheimarros' | 'other')[];
   parallelBatchSize?: number;
+
+  // Batch sizes for parallel fetching
+  refJsonBatchSize?: number;    // Batch size for ref.json fetches within an entity (default: 50)
+  graphdbBatchSize?: number;    // Batch size for GraphDB queries (default: 20)
+  entityBatchSize?: number;     // Batch size for entity processing (default: 10)
 }
 
 export const DEFAULT_PINAX_EXPORT_OPTIONS: Required<PinaxExportOptions> = {
@@ -105,6 +110,9 @@ export const DEFAULT_PINAX_EXPORT_OPTIONS: Required<PinaxExportOptions> = {
   includeComponents: true,
   componentTypes: ['ref', 'pinax', 'description', 'cheimarros', 'other'],
   parallelBatchSize: 10,
+  refJsonBatchSize: 50,
+  graphdbBatchSize: 20,
+  entityBatchSize: 10,
 };
 
 export interface PinaxExport {

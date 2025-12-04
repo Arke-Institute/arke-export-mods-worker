@@ -5,6 +5,7 @@
  */
 
 import type { LinkedEntity, LinkedRelationship } from './types';
+import { processBatch } from './batch-utils.js';
 
 interface GraphDBConfig {
   graphdbUrl: string;
@@ -134,5 +135,37 @@ export class GraphDBClient {
       }
       return { entities: [], relationships: [] };
     }
+  }
+
+  /**
+   * Get entities for multiple PIs in parallel batches
+   *
+   * @param pis - Array of PI identifiers
+   * @param batchSize - Maximum concurrent requests (default: 20)
+   * @returns Map of PI to entities/relationships data
+   */
+  async getEntitiesForPIs(
+    pis: string[],
+    batchSize: number = 20
+  ): Promise<Map<string, { entities: LinkedEntity[]; relationships: LinkedRelationship[] }>> {
+    if (pis.length === 0) {
+      return new Map();
+    }
+
+    if (this.config.verbose) {
+      console.error(`[GraphDB] Batch fetching entities for ${pis.length} PIs (batch size: ${batchSize})`);
+    }
+
+    const results = await processBatch(pis, batchSize, async (pi) => {
+      const data = await this.getEntitiesForPI(pi);
+      return { pi, data };
+    });
+
+    const resultMap = new Map<string, { entities: LinkedEntity[]; relationships: LinkedRelationship[] }>();
+    for (const { pi, data } of results) {
+      resultMap.set(pi, data);
+    }
+
+    return resultMap;
   }
 }
